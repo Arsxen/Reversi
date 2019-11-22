@@ -8,10 +8,8 @@ import abc
 import random
 import asyncio
 import traceback
-import time
 from multiprocessing import Process, Value
 from math import inf
-import sys
 
 import numpy as np
 import gym
@@ -33,6 +31,10 @@ def get_move(board, player):
     valid_actions = _ENV.get_valid((board, player))
     valid_actions = np.array(list(zip(*valid_actions.nonzero())))
     return valid_actions
+
+
+def map_action_to_board(current_board, valid_actions, player):
+    return np.array([transition(current_board, player, action) for action in valid_actions])
 
 
 class ReversiAgent(abc.ABC):
@@ -92,7 +94,7 @@ class ReversiAgent(abc.ABC):
                     output_move_row, output_move_column))
             p.start()
             while p.is_alive():
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
         except asyncio.CancelledError as e:
             print('The previous player is interrupted by a user or a timer.')
         except Exception as e:
@@ -199,14 +201,14 @@ class TonAgent(ReversiAgent):
         # (board,depth) -> (minimax value, depth)
         self.max_transposition = {}
         self.min_transposition = {}
-        self.position_weight = np.array([[1.00, -0.25, 0.10, 0.05, 0.5, 0.10, -0.25, 1.00],
-                                         [-0.25, -0.25, 0.01, 0.01, 0.01, 0.01, -0.25, -0.25],
-                                         [0.10, 0.01, 0.05, 0.02, 0.02, 0.05, 0.01, 0.10],
-                                         [0.05, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.05],
-                                         [0.05, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.05],
-                                         [0.10, 0.01, 0.05, 0.02, 0.02, 0.05, 0.01, 0.10],
-                                         [-0.25, -0.25, 0.01, 0.01, 0.01, 0.01, -0.25, -0.25],
-                                         [1.00, -0.25, 0.10, 0.05, 0.5, 0.10, -0.25, 1.00]])
+        self.position_weight = np.array([[1.01, -0.43, 0.38, 0.07, 0.0, 0.42, -0.20, 1.02],
+                                         [-0.27, -0.74, -0.16, -0.14, -0.13, -0.25, -0.65, -0.39],
+                                         [0.56, -0.30, 0.12, 0.05, -0.04, 0.07, -0.15, 0.48],
+                                         [0.01, -0.08, 0.01, -0.01, -0.04, -0.02, -0.12, 0.03],
+                                         [-0.01, -0.08, 0.01, -0.01, -0.03, 0.02, -0.04, -0.20],
+                                         [0.59, -0.23, 0.06, 0.01, 0.04, 0.06, -0.19, 0.35],
+                                         [-0.06, -0.55, -0.18, -0.08, -0.15, -0.31, -0.82, -0.58],
+                                         [0.96, -0.42, 0.67, -0.02, -0.03, 0.81, -0.51, 1.01]])
 
     def utility(self, winner):
         if winner == self.player:
@@ -229,19 +231,25 @@ class TonAgent(ReversiAgent):
                 score += self.position_weight[i, j] * b
         return score
 
-    def coin_parity(self, board):
-        return (np.sum(board) * self.player)/np.sum(board != 0)
-
-    def mobility(self, board):
-        max_move = len(get_move(board, self.player))
-        min_move = len(get_move(board, -self.player))
-        return (max_move-min_move)/(max_move+min_move)
+    # def coin_parity(self, board):
+    #     return (np.sum(board) * self.player) / np.sum(board != 0)
+    #
+    # def mobility(self, board):
+    #     max_move = len(get_move(board, self.player))
+    #     min_move = len(get_move(board, -self.player))
+    #     return (max_move - min_move) / (max_move + min_move)
 
     def evaluate(self, board):
-        weights = np.array([10, 1])
-        scores = np.array([self.weighted_piece_counter(board), self.coin_parity(board)])
-        return np.sum(weights*scores)
-        # return random.randint(0, 1000)
+        return self.weighted_piece_counter(board)
+
+    def sort_board(self, boards, order):
+        if order == 'a':
+            return np.array(sorted(boards, key=self.evaluate))
+        elif order == 'd':
+            return np.array(sorted(boards, key=self.evaluate, reverse=True))
+
+    def transform_tuple(self, action_tuple):
+        return action_tuple[0], self.evaluate(action_tuple[1])
 
     def alpha_beta_search(self, board, valid_actions):
         v, action = self.root_max_value(board, -inf, inf, valid_actions)
@@ -250,8 +258,14 @@ class TonAgent(ReversiAgent):
     def root_max_value(self, board, alpha, beta, valid_actions):
         v = -inf
         state = OthelloBoard(board)
-        max_action = valid_actions[0]
-        for action in valid_actions:
+
+        # Move Ordering
+        boards = map_action_to_board(board, valid_actions, self.player)
+        ab_tuple = map(self.transform_tuple, zip(valid_actions, boards))
+        sorted_action = sorted(ab_tuple, key=lambda x: x[1], reverse=True)
+
+        max_action, _ = sorted_action[0]
+        for action, _ in sorted_action:
             next_board = transition(board, self.player, action)
             next_state = OthelloBoard(next_board)
             if (next_state, 1) not in self.max_transposition:
@@ -269,16 +283,22 @@ class TonAgent(ReversiAgent):
         return v, max_action
 
     def max_value(self, board, alpha, beta, depth):
+        # Check if game end or reach depth limit
         winner = _ENV.get_winner((board, self.player))
         if winner is not None:
             return self.utility(winner)
         if depth == self.depth_limit:
             return self.evaluate(board)
         v = -inf
+
         state = OthelloBoard(board)
         valid_actions = get_move(board, self.player)
-        for action in valid_actions:
-            next_board = transition(board, self.player, action)
+
+        # Move Ordering
+        boards = map_action_to_board(board, valid_actions, self.player)
+        sorted_boards = self.sort_board(boards, 'd')
+
+        for next_board in sorted_boards:
             next_state = OthelloBoard(next_board)
             if (next_state, depth + 1) not in self.max_transposition:
                 v = max(v, self.min_value(next_board, alpha, beta, depth + 1))
@@ -292,16 +312,22 @@ class TonAgent(ReversiAgent):
         return v
 
     def min_value(self, board, alpha, beta, depth):
+        # Check if game end or reach depth limit
         winner = _ENV.get_winner((board, -self.player))
         if winner is not None:
             return self.utility(winner)
         if depth == self.depth_limit:
             return self.evaluate(board)
         v = inf
+
         state = OthelloBoard(board)
         valid_actions = get_move(board, -self.player)
-        for action in valid_actions:
-            next_board = transition(board, -self.player, action)
+
+        # Move Ordering
+        boards = map_action_to_board(board, valid_actions, -self.player)
+        sorted_boards = self.sort_board(boards, 'a')
+
+        for next_board in sorted_boards:
             next_state = OthelloBoard(next_board)
             if (next_state, depth + 1) not in self.min_transposition:
                 v = min(v, self.max_value(next_board, alpha, beta, depth + 1))

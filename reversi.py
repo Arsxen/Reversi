@@ -15,9 +15,9 @@ import numpy as np
 import boardgame2 as bg2
 
 import reversi_agent as agents
-from reversi_img import ReversiImg
 
 _name = {bg2.BLACK: 'BLACK', bg2.WHITE: 'WHITE'}
+
 
 def clear_screen():
     """Clear the shell."""
@@ -27,33 +27,28 @@ def clear_screen():
         subprocess.call('clear', shell=True)
     # pass
 
+
 def render(board, turn, prev_move=None, prev_turn=None):
     """Render on the screen."""
     clear_screen()
     if prev_move is not None:
         print(f'Previous Move: {prev_move} by {_name[prev_turn]}')
     print(board)
-    # ###############################################
-    # if img is not None:
-    #     img.show_board_img(board)
-    #     img.wait()
-    # ###############################################
     black_score = np.sum(board == bg2.BLACK)
     white_score = np.sum(board == bg2.WHITE)
     print(f'  BLACK : {black_score}  -  {white_score} : WHITE')
 
+
 async def timer(limit):
     """Create a progress bar for timer."""
-    for i in tqdm(range(limit*10), desc="Time Limit: "):
-        await asyncio.sleep(1/10)
+    for i in tqdm(range(limit * 10), desc="Time Limit: "):
+        await asyncio.sleep(1 / 10)
+
 
 async def main(black, white, timelimit=2):
     """Run the game."""
     env = gym.make('Reversi-v0')
     board, turn = env.reset()
-    ###############################################
-    # reimg = ReversiImg(save=True, folder='Res', delay=1)
-    ###############################################
     render(board, turn)
     # Start the game loop.
     for __ in range(200):
@@ -90,7 +85,7 @@ async def main(black, white, timelimit=2):
         render(board, turn, move, prev_turn)
         winner = env.get_winner((board, turn))
         if winner is not None:
-            print('='*40)
+            print('=' * 40)
             if winner == bg2.BLACK:
                 print('BLACK wins!')
             elif winner == bg2.WHITE:
@@ -98,10 +93,6 @@ async def main(black, white, timelimit=2):
             else:
                 print('DRAW!')
             break
-        # ###############################################
-        # reimg.wait(0)
-        # reimg.close_board()
-        # ###############################################
 
 
 if __name__ == "__main__":
